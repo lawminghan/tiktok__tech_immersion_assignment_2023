@@ -20,7 +20,7 @@ func main() {
 
 	err := rdb.InitClient(ctx, "redis:6379", "")
 	if err != nil {
-		errMsg := fmt.Sprintf("failed to init Redis client, err: %v", err)
+		errMsg := fmt.Sprintf("failed to initialise Redis client, err: %v", err)
 		log.Fatal(errMsg)
 	}
 

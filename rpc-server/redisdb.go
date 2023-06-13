@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -13,8 +14,8 @@ type RedisClient struct {
 func (c *RedisClient) InitClient(ctx context.Context, address, password string) error {
 	r := redis.NewClient(&redis.Options{
 		Addr:     address,
-		Password: password, // no password set
-		DB:       0,        // use default DB
+		Password: password, // no password
+		DB:       0,        // default DB
 	})
 
 	// test connection
@@ -32,52 +33,46 @@ type Message struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-func (c *RedisClient) SaveMessage(ctx context.Context, roomID string, message *Message) error {
-	// Marshal the Go struct into JSON bytes
+func (c *RedisClient) SaveMessage(ctx context.Context, chatID string, message *Message) error {
 	text, err := json.Marshal(message)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
 	member := &redis.Z{
-		Score:  message.Timestamp, // The sort key
-		Member: text,              // Data
+		Score:  float64(message.Timestamp), // for sorting
+		Member: text,
 	}
 
-	_, err = c.cli.ZAdd(ctx, roomID, *member).Result()
+	_, err = c.cli.ZAdd(ctx, chatID, *member).Result()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to add message to sorted set: %w", err)
 	}
 
 	return nil
 }
 
-func (c *RedisClient) GetMessagesByRoomID(ctx context.Context, roomID string, start, end int64, reverse bool) ([]*Message, error) {
-	var (
-		rawMessages []string
-		messages    []*Message
-		err         error
-	)
+func (c *RedisClient) GetMessagesByChatID(ctx context.Context, chatID string, start, end int64, reverse bool) ([]*Message, error) {
+	var rawMessages []string
+	var messages []*Message
 
+	var cmd *redis.StringSliceCmd
 	if reverse {
-		// Desc order with time -> first message is the latest message
-		rawMessages, err = c.cli.ZRevRange(ctx, roomID, start, end).Result()
-		if err != nil {
-			return nil, err
-		}
+		cmd = c.cli.ZRevRange(ctx, chatID, start, end)
 	} else {
-		// Asc order with time -> first message is the earliest message
-		rawMessages, err = c.cli.ZRange(ctx, roomID, start, end).Result()
-		if err != nil {
-			return nil, err
-		}
+		cmd = c.cli.ZRange(ctx, chatID, start, end)
+	}
+
+	rawMessages, err := cmd.Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve messages from sorted set: %w", err)
 	}
 
 	for _, msg := range rawMessages {
 		temp := &Message{}
 		err := json.Unmarshal([]byte(msg), temp)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to unmarshal message: %w", err)
 		}
 		messages = append(messages, temp)
 	}
